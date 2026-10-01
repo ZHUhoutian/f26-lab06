@@ -11,20 +11,41 @@ Keep it short and specific. Point at methods, call sites, and error text.
 
 ### Prediction (write this before you run the build, and you can deliberate with your agent)
 
-**Will the consumer, untouched, still compile and pass?** Yes or no.
+**Will the consumer, untouched, still compile and pass?** Yes.
 
 **Why.** What does the compiler do with the consumer's existing call sites once
 the new overload exists?
-
+Java resolves overloads at compile time by number and types of arguments. The consumer's 4-argument calls still match only the original signature, so the new 5-argument overload is invisible to them.
 ### What happened
 
 **The result.** What the build printed for each module.
+
+`mvn -B clean test` after adding `createBooking(String, long, long, String, String notes)`
+to `BookingApi` / `InMemoryBookingService` and `getNotes()` to `Booking`
+(`consumer/` untouched):
+
+```
+[INFO] Building lab06-api 1.0.0                                           [2/3]
+[INFO] Compiling 4 source files with javac [debug deprecation release 21] to target/classes
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0
+[INFO] Building lab06-consumer 1.0.0                                      [3/3]
+[INFO] Compiling 1 source file with javac [debug deprecation release 21] to target/classes
+[INFO] Compiling 1 source file with javac [debug deprecation release 21] to target/test-classes
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0
+[INFO] lab06-booking-parent ............................... SUCCESS
+[INFO] lab06-api .......................................... SUCCESS
+[INFO] lab06-consumer ..................................... SUCCESS
+[INFO] BUILD SUCCESS
+```
+
+Both modules green, no warnings. The consumer recompiled against the new API
+and all 7 of its tests passed.
 
 **If your prediction was wrong,** say what you missed.
 
 **Is an additive change always safe in Java?** One case where adding something
 to an API still breaks a caller, if you can name one.
-
+Adding an abstract method breaks anyone who implements BookingApi. A same-arity overload can make a null argument ambiguous.
 ---
 
 ## Milestone 2: The request object

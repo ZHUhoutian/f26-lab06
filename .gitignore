@@ -14,3 +14,4 @@ target/
 # Lab forks are public; agent transcripts never belong in a lab repo.
 # Assignment repos are private and DO commit transcripts/.
 transcripts/
+requirement.md

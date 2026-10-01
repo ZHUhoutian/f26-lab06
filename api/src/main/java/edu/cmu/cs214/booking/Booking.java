@@ -16,16 +16,18 @@ public final class Booking {
     private final long startMinute;
     private final long endMinute;
     private final String waitlistKey;
+    private final String notes;
     private BookingStatus status;
 
     Booking(long id, String roomId, long startMinute, long endMinute,
-            BookingStatus status, String waitlistKey) {
+            BookingStatus status, String waitlistKey, String notes) {
         this.id = id;
         this.roomId = roomId;
         this.startMinute = startMinute;
         this.endMinute = endMinute;
         this.status = status;
         this.waitlistKey = waitlistKey;
+        this.notes = notes;
     }
 
     public long getId() {
@@ -51,6 +53,11 @@ public final class Booking {
     /** The waitlist key this booking was created with, or null if none was given. */
     public String getWaitlistKey() {
         return waitlistKey;
+    }
+
+    /** The notes this booking was created with, or null if none were given. */
+    public String getNotes() {
+        return notes;
     }
 
     void setStatus(BookingStatus status) {
