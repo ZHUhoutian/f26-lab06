@@ -42,6 +42,7 @@ Both modules green, no warnings. The consumer recompiled against the new API
 and all 7 of its tests passed.
 
 **If your prediction was wrong,** say what you missed.
+It was not wrong: both modules stayed green, as predicted.
 
 **Is an additive change always safe in Java?** One case where adding something
 to an API still breaks a caller, if you can name one.
@@ -132,6 +133,12 @@ The `api/` tests ran (5 run, 0 failures). The consumer's tests did not run:
 the build stopped at `lab06-consumer`'s `compile` goal, so `FrontDeskTest`
 never reached the `test` phase (no `Tests run` line for it).
 
+Only the consumer's build detected the contract break. The `api/` suite was
+green, because we rewrote it in step with the change, so it can only tell us
+our implementation still works, not that our callers still work. A producer's
+own tests cannot catch a break in a caller they do not control; the caller's
+build (here, because it runs in our reactor) is what catches it.
+
 ### Step 2: the deprecation path
 
 **What you added.** The signatures that came back, and what they delegate to.
@@ -188,8 +195,24 @@ no warnings, since its tests already use the new call).
 **What the deprecation path resolves.** Who can now build that could not build
 during step 1, and who is on which schedule.
 
+The deprecation path turns the breaking change back into a compatible one.
+The old signatures exist again and delegate to `createBooking(BookingRequest)`,
+so the untouched consumer compiles and its 7 tests pass with no edits at all.
+The front desk team, who could not build at all in step 1, can now build, and
+they migrate to `BookingRequest` on their own schedule. We, the producer, are
+already on the new API, and we can remove the deprecated overloads later, once
+callers have moved, on a schedule we announce.
+
 **What the warnings accomplish that a README note would not.** Be concrete
 about where the warning shows up and who sees it without looking for it.
+
+The warning appears when the consumer's code is compiled (before any test
+runs), in the consumer team's own build output, pointing at the exact file and
+line of each old call (`FrontDesk.java:[27,19]` and `[33,19]`). The developer
+who owns that code sees it on every clean build without looking for it, and
+IDEs strike through the old call. The `@deprecated` javadoc names the
+replacement. A README note only reaches someone who goes and reads our README,
+and it cannot say which of their lines need changing.
 
 ---
 
@@ -201,20 +224,79 @@ Not coded. One misuse, one redesign, one cost. Discuss it with your TA.
 
 **What is easy to get wrong.** One specific thing about the API surface.
 
+The `boolean notifyWaitlist` flag on `cancelBooking(long bookingId, boolean
+notifyWaitlist)`. At the call site it is a bare `true` or `false`, so a reader
+cannot tell whether it means "promote the next waitlisted guest", "force the
+cancel", or "confirm the cancel" without opening the javadoc. Any boolean is
+accepted, so swapping the two values, or passing some unrelated boolean,
+compiles fine.
+
 **The call site.** File and line in `consumer/`, with the call. Show the
 code that a reader cannot understand without opening the javadoc, or that a
 caller could get wrong with the compiler still happy.
 
+```java
+// consumer/src/main/java/edu/cmu/cs214/frontdesk/FrontDesk.java:49
+return api.cancelBooking(bookingId, true);    // cancelAndOfferToWaitlist
+
+// consumer/src/main/java/edu/cmu/cs214/frontdesk/FrontDesk.java:54
+return api.cancelBooking(bookingId, false);   // cancelQuietly
+```
+
+The only thing telling these apart is one literal. If they were swapped, both
+lines would still compile.
+
 **What goes wrong when it happens.** Silent bad behavior, wrong data, a crash
 somewhere far away?
+
+Silent wrong behavior with no exception. With the values swapped:
+`cancelQuietly` (meant for desk corrections and typos) would promote a
+waitlisted guest to CONFIRMED, giving away a room nobody actually freed; and
+`cancelAndOfferToWaitlist` would never promote anyone, so waitlisted guests
+stay WAITLISTED even though the room is free. The cancel itself still returns
+`true`, so nothing looks wrong until a guest shows up.
 
 ### The redesign
 
 **The proposal.** Types, enums, factories, or whatever you are proposing. Show
 the new signature and the new call site.
 
+Replace the boolean with an enum that names the policy:
+
+```java
+/** What happens to the waitlist when a booking is cancelled. */
+public enum WaitlistPolicy {
+    /** Promote the first eligible overlapping waitlisted booking. */
+    PROMOTE_NEXT,
+    /** Cancel without promoting anyone. */
+    LEAVE_WAITLIST
+}
+
+boolean cancelBooking(long bookingId, WaitlistPolicy policy);
+```
+
+New call sites in `FrontDesk`:
+
+```java
+api.cancelBooking(bookingId, WaitlistPolicy.PROMOTE_NEXT);    // line 49, was true
+api.cancelBooking(bookingId, WaitlistPolicy.LEAVE_WAITLIST);  // line 54, was false
+```
+
 **Why the mistake is now hard or impossible to make.** Point at the mechanism,
 such as the compiler, a validating constructor, or an exhaustive switch.
+
+- **The compiler's type check.** `cancelBooking(id, true)` or
+  `cancelBooking(id, someOtherBoolean)` no longer compiles; only a
+  `WaitlistPolicy` constant is accepted.
+- **The name at the call site.** The intent is written in the code, so a wrong
+  choice (`cancelQuietly` passing `PROMOTE_NEXT`) is visible in code review
+  without opening the javadoc.
+- **An exhaustive `switch` in the implementation.** If the implementation
+  switches over `WaitlistPolicy` with no `default`, adding a third constant
+  later breaks the implementation's build until the new case is handled.
+
+This makes the mistake hard, not impossible: a caller can still pick the wrong
+constant, but they can no longer do it by accident without it being readable.
 
 ### One tradeoff
 
@@ -222,4 +304,21 @@ such as the compiler, a validating constructor, or an exhaustive switch.
 against the deprecation path you just built, or more types for a newcomer to
 learn. "No real downside" does not count.
 
+Migration burden. Changing `cancelBooking(long, boolean)` to
+`cancelBooking(long, WaitlistPolicy)` is a breaking change, exactly like
+Milestone 2: the consumer's lines 49 and 54 would stop compiling. To avoid
+that we would keep the old method as a `@Deprecated` default that maps
+`true` to `PROMOTE_NEXT` and `false` to `LEAVE_WAITLIST`, and run a second
+deprecation cycle. That means one more legacy overload to maintain until it can
+be removed, and the front desk team has to edit both call sites on their own
+schedule. It also adds a new type to the API that has to be documented and
+versioned: once callers depend on `WaitlistPolicy`, adding a constant can break
+anyone who switches over it.
+
 **When the price is worth paying.** A condition under which it is.
+
+When getting the flag wrong fails silently and costs something real, as here
+(a guest is wrongly given a room, or a free room is never offered), and the
+callers are another team who will not read the javadoc at every call site. It
+is less worth it for an internal flag with one caller where a wrong value would
+fail loudly.

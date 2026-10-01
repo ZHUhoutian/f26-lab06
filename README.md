@@ -42,3 +42,7 @@ From this directory. Maven builds `api` first, then compiles and tests
   you want it running.
 
 See the Lab 6 handout on the course page for the three milestones you show a TA.
+
+## Tools used
+
+Claude Code (VS Code extension) with Claude Opus 5.5 (`claude-opus-5-5`).
